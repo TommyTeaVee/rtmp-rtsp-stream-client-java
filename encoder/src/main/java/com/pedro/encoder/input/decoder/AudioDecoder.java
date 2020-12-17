@@ -132,16 +132,16 @@ public class AudioDecoder extends BaseDecoder {
             codec.releaseOutputBuffer(outIndex, false);
             break;
         }
+      }
 
-        // All decoded frames have been rendered, we can stop playing now
-        if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-          seekTime = 0;
-          Log.i(TAG, "end of file out");
-          if (loopMode) {
-            loopFileInterface.onReset(false);
-          } else {
-            audioDecoderInterface.onAudioDecoderFinished();
-          }
+      // All decoded frames have been rendered, we can stop playing now
+      if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+        seekTime = 0;
+        Log.i(TAG, "end of file out");
+        if (loopMode) {
+          loopFileInterface.onReset(false);
+        } else {
+          audioDecoderInterface.onAudioDecoderFinished();
         }
       }
     }

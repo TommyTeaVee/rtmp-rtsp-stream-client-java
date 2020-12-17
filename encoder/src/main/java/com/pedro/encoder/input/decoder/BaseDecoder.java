@@ -105,6 +105,7 @@ public abstract class BaseDecoder {
   }
 
   public void stop() {
+    running = false;
     stopDecoder();
     if (extractor != null) {
       extractor.release();
@@ -138,16 +139,27 @@ public abstract class BaseDecoder {
     running = false;
     seekTime = 0;
     if (handlerThread != null) {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-        handlerThread.quitSafely();
-      } else {
-        handlerThread.quit();
+      if (handlerThread.getLooper() != null) {
+        if (handlerThread.getLooper().getThread() != null) {
+          handlerThread.getLooper().getThread().interrupt();
+        }
+        handlerThread.getLooper().quit();
       }
+      handlerThread.quit();
+      if (codec != null) {
+        try {
+          codec.flush();
+        } catch (IllegalStateException ignored) { }
+      }
+      //wait for thread to die for 500ms.
+      try {
+        handlerThread.getLooper().getThread().join(500);
+      } catch (Exception ignored) { }
       handlerThread = null;
     }
     try {
       codec.stop();
-      //codec.release();
+      codec.release();
       codec = null;
     } catch (IllegalStateException | NullPointerException e) {
       codec = null;

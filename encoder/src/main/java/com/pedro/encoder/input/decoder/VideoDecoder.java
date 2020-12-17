@@ -84,14 +84,14 @@ public class VideoDecoder extends BaseDecoder {
         }
         codec.releaseOutputBuffer(outIndex, bufferInfo.size != 0);
       }
-      if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-        seekTime = 0;
-        Log.i(TAG, "end of file out");
-        if (loopMode) {
-          loopFileInterface.onReset(true);
-        } else {
-          videoDecoderInterface.onVideoDecoderFinished();
-        }
+    }
+    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+      seekTime = 0;
+      Log.i(TAG, "end of file out");
+      if (loopMode) {
+        loopFileInterface.onReset(true);
+      } else {
+        videoDecoderInterface.onVideoDecoderFinished();
       }
     }
   }

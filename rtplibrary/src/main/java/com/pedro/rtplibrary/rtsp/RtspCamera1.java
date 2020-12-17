@@ -133,7 +133,7 @@ public class RtspCamera1 extends Camera1Base {
 
   @Override
   protected void startStreamRtp(String url) {
-    rtspClient.setUrl(url);
+    rtspClient.connect(url);
   }
 
   @Override
@@ -157,6 +157,11 @@ public class RtspCamera1 extends Camera1Base {
   }
 
   @Override
+  public boolean hasCongestion() {
+    return rtspClient.hasCongestion();
+  }
+
+  @Override
   protected void getAacDataRtp(ByteBuffer aacBuffer, MediaCodec.BufferInfo info) {
     rtspClient.sendAudio(aacBuffer, info);
   }
@@ -167,7 +172,6 @@ public class RtspCamera1 extends Camera1Base {
     ByteBuffer newPps = pps.duplicate();
     ByteBuffer newVps = vps != null ? vps.duplicate() : null;
     rtspClient.setSPSandPPS(newSps, newPps, newVps);
-    rtspClient.connect();
   }
 
   @Override

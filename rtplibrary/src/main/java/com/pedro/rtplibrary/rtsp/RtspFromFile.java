@@ -129,11 +129,8 @@ public class RtspFromFile extends FromFileBase {
 
   @Override
   protected void startStreamRtp(String url) {
-    rtspClient.setUrl(url);
     rtspClient.setOnlyAudio(!videoEnabled);
-    if (!videoEnabled) {
-      rtspClient.connect();
-    }
+    rtspClient.connect(url);
   }
 
   @Override
@@ -157,12 +154,16 @@ public class RtspFromFile extends FromFileBase {
   }
 
   @Override
+  public boolean hasCongestion() {
+    return rtspClient.hasCongestion();
+  }
+
+  @Override
   protected void onSpsPpsVpsRtp(ByteBuffer sps, ByteBuffer pps, ByteBuffer vps) {
     ByteBuffer newSps = sps.duplicate();
     ByteBuffer newPps = pps.duplicate();
     ByteBuffer newVps = vps != null ? vps.duplicate() : null;
     rtspClient.setSPSandPPS(newSps, newPps, newVps);
-    rtspClient.connect();
   }
 
   @Override

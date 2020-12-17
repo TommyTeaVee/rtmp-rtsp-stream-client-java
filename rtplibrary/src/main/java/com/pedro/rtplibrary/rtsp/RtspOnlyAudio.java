@@ -95,8 +95,7 @@ public class RtspOnlyAudio extends OnlyAudioBase {
 
   @Override
   protected void startStreamRtp(String url) {
-    rtspClient.setUrl(url);
-    rtspClient.connect();
+    rtspClient.connect(url);
   }
 
   @Override
@@ -117,6 +116,11 @@ public class RtspOnlyAudio extends OnlyAudioBase {
   @Override
   public void reConnect(long delay) {
     rtspClient.reConnect(delay);
+  }
+
+  @Override
+  public boolean hasCongestion() {
+    return rtspClient.hasCongestion();
   }
 
   @Override

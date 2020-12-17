@@ -5,11 +5,15 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
 import android.os.Build;
+import android.util.Range;
 import android.util.Size;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.TextureView;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import com.pedro.encoder.Frame;
 import com.pedro.encoder.audio.AudioEncoder;
@@ -17,6 +21,8 @@ import com.pedro.encoder.audio.GetAacData;
 import com.pedro.encoder.input.audio.CustomAudioEffect;
 import com.pedro.encoder.input.audio.GetMicrophoneData;
 import com.pedro.encoder.input.audio.MicrophoneManager;
+import com.pedro.encoder.input.audio.MicrophoneManagerManual;
+import com.pedro.encoder.input.audio.MicrophoneMode;
 import com.pedro.encoder.input.video.Camera2ApiManager;
 import com.pedro.encoder.input.video.CameraCallbacks;
 import com.pedro.encoder.input.video.CameraHelper;
@@ -31,6 +37,8 @@ import com.pedro.rtplibrary.view.GlInterface;
 import com.pedro.rtplibrary.view.LightOpenGlView;
 import com.pedro.rtplibrary.view.OffScreenGlThread;
 import com.pedro.rtplibrary.view.OpenGlView;
+
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -116,9 +124,29 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
   private void init(Context context) {
     cameraManager = new Camera2ApiManager(context);
     videoEncoder = new VideoEncoder(this);
-    microphoneManager = new MicrophoneManager(this);
-    audioEncoder = new AudioEncoder(this);
+    setMicrophoneMode(MicrophoneMode.ASYNC);
     recordController = new RecordController();
+  }
+
+  /**
+   * Must be called before prepareAudio.
+   *
+   * @param microphoneMode mode to work accord to audioEncoder. By default ASYNC:
+   * SYNC using same thread. This mode could solve choppy audio or AudioEncoder frame discarded.
+   * ASYNC using other thread.
+   */
+  public void setMicrophoneMode(MicrophoneMode microphoneMode) {
+    switch (microphoneMode) {
+      case SYNC:
+        microphoneManager = new MicrophoneManagerManual();
+        audioEncoder = new AudioEncoder(this);
+        audioEncoder.setGetFrame(((MicrophoneManagerManual) microphoneManager).getGetFrame());
+        break;
+      case ASYNC:
+        microphoneManager = new MicrophoneManager(this);
+        audioEncoder = new AudioEncoder(this);
+        break;
+    }
   }
 
   public void setCameraCallbacks(CameraCallbacks callbacks) {
@@ -259,7 +287,9 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
    */
   public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
       boolean noiseSuppressor) {
-    microphoneManager.createMicrophone(sampleRate, isStereo, echoCanceler, noiseSuppressor);
+    if (!microphoneManager.createMicrophone(sampleRate, isStereo, echoCanceler, noiseSuppressor)) {
+      return false;
+    }
     prepareAudioRtp(isStereo, sampleRate);
     return audioEncoder.prepareAudioEncoder(bitrate, sampleRate, isStereo,
         microphoneManager.getMaxInputSize());
@@ -278,7 +308,7 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
    */
   public boolean prepareVideo() {
     int rotation = CameraHelper.getCameraOrientation(context);
-    return prepareVideo(640, 480, 30, 1200 * 1024, rotation);
+    return prepareVideo(1280, 720, 30, 1200 * 1024, rotation);
   }
 
   /**
@@ -301,12 +331,13 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
   }
 
   /**
-   * Start record a MP4 video. Need be called while stream.
+   * Starts recording an MP4 video. Needs to be called while streaming.
    *
-   * @param path where file will be saved.
-   * @throws IOException If you init it before start stream.
+   * @param path Where file will be saved.
+   * @throws IOException If initialized before a stream.
    */
-  public void startRecord(String path, RecordController.Listener listener) throws IOException {
+  public void startRecord(@NonNull String path, @Nullable RecordController.Listener listener)
+      throws IOException {
     recordController.startRecord(path, listener);
     if (!streaming) {
       startEncoders();
@@ -315,8 +346,30 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
     }
   }
 
-  public void startRecord(final String path) throws IOException {
+  public void startRecord(@NonNull final String path) throws IOException {
     startRecord(path, null);
+  }
+
+  /**
+   * Starts recording an MP4 video. Needs to be called while streaming.
+   *
+   * @param fd Where the file will be saved.
+   * @throws IOException If initialized before a stream.
+   */
+  @RequiresApi(api = Build.VERSION_CODES.O)
+  public void startRecord(@NonNull final FileDescriptor fd,
+      @Nullable RecordController.Listener listener) throws IOException {
+    recordController.startRecord(fd, listener);
+    if (!streaming) {
+      startEncoders();
+    } else if (videoEncoder.isRunning()) {
+      resetVideoEncoder();
+    }
+  }
+
+  @RequiresApi(api = Build.VERSION_CODES.O)
+  public void startRecord(@NonNull final FileDescriptor fd) throws IOException {
+    startRecord(fd, null);
   }
 
   /**
@@ -367,7 +420,7 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
           this.glInterface.addMediaCodecSurface(videoEncoder.getInputSurface());
         }
         cameraManager.prepareCamera(this.glInterface.getSurfaceTexture(), videoEncoder.getWidth(),
-            videoEncoder.getHeight());
+            videoEncoder.getHeight(), videoEncoder.getFps());
         cameraManager.openLastCamera();
       } else {
         this.glInterface = glInterface;
@@ -389,9 +442,10 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
       previewWidth = width;
       previewHeight = height;
       if (surfaceView != null) {
-        cameraManager.prepareCamera(surfaceView.getHolder().getSurface());
+        cameraManager.prepareCamera(surfaceView.getHolder().getSurface(), videoEncoder.getFps());
       } else if (textureView != null) {
-        cameraManager.prepareCamera(new Surface(textureView.getSurfaceTexture()));
+        cameraManager.prepareCamera(new Surface(textureView.getSurfaceTexture()),
+            videoEncoder.getFps());
       } else if (glInterface != null) {
         boolean isPortrait = CameraHelper.isPortrait(context);
         if (isPortrait) {
@@ -401,7 +455,8 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
         }
         glInterface.setRotation(rotation == 0 ? 270 : rotation - 90);
         glInterface.start();
-        cameraManager.prepareCamera(glInterface.getSurfaceTexture(), width, height);
+        cameraManager.prepareCamera(glInterface.getSurfaceTexture(), width, height,
+            videoEncoder.getFps());
       }
       cameraManager.openCameraFacing(cameraFacing);
       onPreview = true;
@@ -490,7 +545,7 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
       glInterface.addMediaCodecSurface(videoEncoder.getInputSurface());
     } else {
       cameraManager.closeCamera();
-      cameraManager.prepareCamera(videoEncoder.getInputSurface());
+      cameraManager.prepareCamera(videoEncoder.getInputSurface(), videoEncoder.getFps());
       cameraManager.openLastCamera();
     }
   }
@@ -517,7 +572,7 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
         glInterface.addMediaCodecSurface(videoEncoder.getInputSurface());
       }
       cameraManager.prepareCamera(glInterface.getSurfaceTexture(), videoEncoder.getWidth(),
-          videoEncoder.getHeight());
+          videoEncoder.getHeight(), videoEncoder.getFps());
     }
   }
 
@@ -581,6 +636,8 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
   protected abstract void reConnect(long delay);
 
   //cache control
+  public abstract boolean hasCongestion();
+
   public abstract void resizeCache(int newSize) throws RuntimeException;
 
   public abstract int getCacheSize();
@@ -617,6 +674,10 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
    */
   public List<Size> getResolutionsFront() {
     return Arrays.asList(cameraManager.getCameraResolutionsFront());
+  }
+
+  public Range<Integer>[] getSupportedFps() {
+    return cameraManager.getSupportedFps();
   }
 
   /**
@@ -735,12 +796,14 @@ public abstract class Camera2Base implements GetAacData, GetVideoData, GetMicrop
 
   private void prepareCameraManager() {
     if (textureView != null) {
-      cameraManager.prepareCamera(textureView, videoEncoder.getInputSurface());
+      cameraManager.prepareCamera(textureView, videoEncoder.getInputSurface(),
+          videoEncoder.getFps());
     } else if (surfaceView != null) {
-      cameraManager.prepareCamera(surfaceView, videoEncoder.getInputSurface());
+      cameraManager.prepareCamera(surfaceView, videoEncoder.getInputSurface(),
+          videoEncoder.getFps());
     } else if (glInterface != null) {
     } else {
-      cameraManager.prepareCamera(videoEncoder.getInputSurface());
+      cameraManager.prepareCamera(videoEncoder.getInputSurface(), videoEncoder.getFps());
     }
     videoEnabled = true;
   }

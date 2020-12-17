@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
+import android.util.Range;
 import android.util.Size;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -69,6 +70,7 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
   private boolean lanternEnable = false;
   private boolean autoFocusEnabled = true;
   private boolean running = false;
+  private int fps = 30;
   private final Semaphore semaphore = new Semaphore(0);
   private CameraCallbacks cameraCallbacks;
 
@@ -85,26 +87,30 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
     cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
   }
 
-  public void prepareCamera(SurfaceView surfaceView, Surface surface) {
+  public void prepareCamera(SurfaceView surfaceView, Surface surface, int fps) {
     this.surfaceView = surfaceView;
     this.surfaceEncoder = surface;
+    this.fps = fps;
     prepared = true;
   }
 
-  public void prepareCamera(TextureView textureView, Surface surface) {
+  public void prepareCamera(TextureView textureView, Surface surface, int fps) {
     this.textureView = textureView;
     this.surfaceEncoder = surface;
+    this.fps = fps;
     prepared = true;
   }
 
-  public void prepareCamera(Surface surface) {
+  public void prepareCamera(Surface surface, int fps) {
     this.surfaceEncoder = surface;
+    this.fps = fps;
     prepared = true;
   }
 
-  public void prepareCamera(SurfaceTexture surfaceTexture, int width, int height) {
+  public void prepareCamera(SurfaceTexture surfaceTexture, int width, int height, int fps) {
     surfaceTexture.setDefaultBufferSize(width, height);
     this.surfaceEncoder = new Surface(surfaceTexture);
+    this.fps = fps;
     prepared = true;
   }
 
@@ -142,10 +148,14 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
         @Override
         public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
           cameraCaptureSession.close();
+          if (cameraCallbacks != null) cameraCallbacks.onCameraError("Configuration failed");
           Log.e(TAG, "Configuration failed");
         }
-      }, null);
-    } catch (CameraAccessException e) {
+      }, cameraHandler);
+    } catch (CameraAccessException | IllegalArgumentException e) {
+      if (cameraCallbacks != null) {
+        cameraCallbacks.onCameraError("Create capture session failed: " + e.getMessage());
+      }
       Log.e(TAG, "Error", e);
     } catch (IllegalStateException e) {
       reOpenCamera(cameraId != -1 ? cameraId : 0);
@@ -167,8 +177,41 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
     try {
       builderInputSurface = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
       for (Surface surface : surfaces) if (surface != null) builderInputSurface.addTarget(surface);
+      adaptFpsRange(fps, builderInputSurface);
       return builderInputSurface.build();
     } catch (CameraAccessException | IllegalStateException e) {
+      Log.e(TAG, "Error", e);
+      return null;
+    }
+  }
+
+  private void adaptFpsRange(int expectedFps, CaptureRequest.Builder builderInputSurface) {
+    Range<Integer>[] fpsRanges = getSupportedFps();
+    if (fpsRanges != null && fpsRanges.length > 0) {
+      Range<Integer> closestRange = fpsRanges[0];
+      int measure = Math.abs(closestRange.getLower() - expectedFps) + Math.abs(
+          closestRange.getUpper() - expectedFps);
+      for (Range<Integer> range : fpsRanges) {
+        if (range.getLower() <= expectedFps && range.getUpper() >= expectedFps) {
+          int curMeasure =
+              Math.abs(range.getLower() - expectedFps) + Math.abs(range.getUpper() - expectedFps);
+          if (curMeasure < measure) {
+            closestRange = range;
+            measure = curMeasure;
+          }
+        }
+      }
+      Log.i(TAG, "camera2 fps: " + closestRange.getLower() + " - " + closestRange.getUpper());
+      builderInputSurface.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, closestRange);
+    }
+  }
+
+  public Range<Integer>[] getSupportedFps() {
+    try {
+      CameraCharacteristics characteristics = getCameraCharacteristics();
+      if (characteristics == null) return null;
+      return characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+    } catch (IllegalStateException e) {
       Log.e(TAG, "Error", e);
       return null;
     }
@@ -475,6 +518,9 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
           cameraCallbacks.onCameraChanged(isFrontCamera);
         }
       } catch (CameraAccessException | SecurityException e) {
+        if (cameraCallbacks != null) {
+          cameraCallbacks.onCameraError("Open camera " + cameraId + " failed");
+        }
         Log.e(TAG, "Error", e);
       }
     } else {
@@ -505,11 +551,11 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
     if (cameraDevice != null) {
       closeCamera(false);
       if (textureView != null) {
-        prepareCamera(textureView, surfaceEncoder);
+        prepareCamera(textureView, surfaceEncoder, fps);
       } else if (surfaceView != null) {
-        prepareCamera(surfaceView, surfaceEncoder);
+        prepareCamera(surfaceView, surfaceEncoder, fps);
       } else {
-        prepareCamera(surfaceEncoder);
+        prepareCamera(surfaceEncoder, fps);
       }
       openCameraId(cameraId);
     }
@@ -531,14 +577,16 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
     try {
       float maxZoom = getMaxZoom();
       //Avoid out range level
-      if (level <= 0f) level = 0.01f;
-      else if (level > maxZoom) level = maxZoom;
+      if (level <= 0f) {
+        level = 0.01f;
+      } else if (level > maxZoom) level = maxZoom;
 
       CameraCharacteristics characteristics = getCameraCharacteristics();
       if (characteristics == null) return;
       Rect rect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
       if (rect == null) return;
-      float ratio = 1f / level; //This ratio is the ratio of cropped Rect to Camera's original(Maximum) Rect
+      //This ratio is the ratio of cropped Rect to Camera's original(Maximum) Rect
+      float ratio = 1f / level;
       //croppedWidth and croppedHeight are the pixels cropped away, not pixels after cropped
       int croppedWidth = rect.width() - Math.round((float) rect.width() * ratio);
       int croppedHeight = rect.height() - Math.round((float) rect.height() * ratio);
@@ -548,6 +596,7 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
       builderInputSurface.set(CaptureRequest.SCALER_CROP_REGION, zoom);
       cameraCaptureSession.setRepeatingRequest(builderInputSurface.build(),
           faceDetectionEnabled ? cb : null, null);
+      zoomLevel = level;
     } catch (CameraAccessException e) {
       Log.e(TAG, "Error", e);
     }
@@ -560,18 +609,19 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
       float delta = 0.1f;
       float maxZoom = getMaxZoom();
       if (fingerSpacing != 0) {
+        float newLevel = zoomLevel;
         if (currentFingerSpacing > fingerSpacing) { //Don't over zoom-in
           if ((maxZoom - zoomLevel) <= delta) {
             delta = maxZoom - zoomLevel;
           }
-          zoomLevel += delta;
+          newLevel += delta;
         } else if (currentFingerSpacing < fingerSpacing) { //Don't over zoom-out
           if ((zoomLevel - delta) < 1f) {
             delta = zoomLevel - 1f;
           }
-          zoomLevel -= delta;
+          newLevel -= delta;
         }
-        setZoom(zoomLevel);
+        setZoom(newLevel);
       }
       fingerSpacing = currentFingerSpacing;
     }
@@ -600,7 +650,7 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
         } else {
           Log.e(TAG, "preview surface is null");
         }
-      } catch (CameraAccessException e) {
+      } catch (CameraAccessException | IllegalStateException e) {
         Log.e(TAG, "Error", e);
       }
     }
@@ -651,6 +701,7 @@ public class Camera2ApiManager extends CameraDevice.StateCallback {
   public void onError(@NonNull CameraDevice cameraDevice, int i) {
     cameraDevice.close();
     semaphore.release();
+    if (cameraCallbacks != null) cameraCallbacks.onCameraError("Open camera failed: " + i);
     Log.e(TAG, "Open failed");
   }
 

@@ -72,19 +72,33 @@ public abstract class BaseEncoder implements EncoderCallback {
   protected abstract void stopImp();
 
   protected void fixTimeStamp(MediaCodec.BufferInfo info) {
-    if (oldTimeStamp > info.presentationTimeUs) info.presentationTimeUs = oldTimeStamp;
-    else oldTimeStamp = info.presentationTimeUs;
+    if (oldTimeStamp > info.presentationTimeUs) {
+      info.presentationTimeUs = oldTimeStamp;
+    } else {
+      oldTimeStamp = info.presentationTimeUs;
+    }
   }
 
   public void stop() {
     running = false;
     stopImp();
     if (handlerThread != null) {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-        handlerThread.quitSafely();
-      } else {
-        handlerThread.quit();
+      if (handlerThread.getLooper() != null) {
+        if (handlerThread.getLooper().getThread() != null) {
+          handlerThread.getLooper().getThread().interrupt();
+        }
+        handlerThread.getLooper().quit();
       }
+      handlerThread.quit();
+      if (codec != null) {
+        try {
+          codec.flush();
+        } catch (IllegalStateException ignored) { }
+      }
+      //wait for thread to die for 500ms.
+      try {
+        handlerThread.getLooper().getThread().join(500);
+      } catch (Exception ignored) { }
     }
     queue.clear();
     queue = new ArrayBlockingQueue<>(80);
@@ -107,7 +121,7 @@ public abstract class BaseEncoder implements EncoderCallback {
         inputAvailable(codec, inBufferIndex);
       }
     }
-    for (; running; ) {
+    while (running) {
       int outBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0);
       if (outBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
         MediaFormat mediaFormat = codec.getOutputFormat();
@@ -126,10 +140,12 @@ public abstract class BaseEncoder implements EncoderCallback {
       int inBufferIndex) throws IllegalStateException {
     try {
       Frame frame = getInputFrame();
+      while (frame == null) frame = getInputFrame();
       byteBuffer.clear();
-      byteBuffer.put(frame.getBuffer(), frame.getOffset(), frame.getSize());
+      int size = Math.max(frame.getSize(), 0);
+      byteBuffer.put(frame.getBuffer(), frame.getOffset(), size);
       long pts = System.nanoTime() / 1000 - presentTimeUs;
-      mediaCodec.queueInputBuffer(inBufferIndex, 0, frame.getSize(), pts, 0);
+      mediaCodec.queueInputBuffer(inBufferIndex, 0, size, pts, 0);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (NullPointerException e) {
