@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtpstreamer.openglexample;
 
 import android.graphics.BitmapFactory;
@@ -6,7 +22,6 @@ import android.graphics.SurfaceTexture;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
@@ -27,6 +42,7 @@ import com.pedro.encoder.input.gl.render.filters.BlackFilterRender;
 import com.pedro.encoder.input.gl.render.filters.BlurFilterRender;
 import com.pedro.encoder.input.gl.render.filters.BrightnessFilterRender;
 import com.pedro.encoder.input.gl.render.filters.CartoonFilterRender;
+import com.pedro.encoder.input.gl.render.filters.ChromaFilterRender;
 import com.pedro.encoder.input.gl.render.filters.CircleFilterRender;
 import com.pedro.encoder.input.gl.render.filters.ColorFilterRender;
 import com.pedro.encoder.input.gl.render.filters.ContrastFilterRender;
@@ -66,6 +82,7 @@ import com.pedro.encoder.utils.gl.TranslateTo;
 import com.pedro.rtplibrary.rtsp.RtspCamera1;
 import com.pedro.rtplibrary.view.OpenGlView;
 import com.pedro.rtpstreamer.R;
+import com.pedro.rtpstreamer.utils.PathUtils;
 import com.pedro.rtsp.utils.ConnectCheckerRtsp;
 
 import java.io.File;
@@ -76,6 +93,8 @@ import java.util.Locale;
 
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
+
+import org.jetbrains.annotations.NotNull;
 
 /**
  * More documentation see:
@@ -93,8 +112,7 @@ public class OpenGlRtspActivity extends AppCompatActivity
   private EditText etUrl;
 
   private String currentDateAndTime = "";
-  private File folder = new File(Environment.getExternalStorageDirectory().getAbsolutePath()
-      + "/rtmp-rtsp-stream-client-java");
+  private File folder;
   private OpenGlView openGlView;
   private SpriteGestureController spriteGestureController = new SpriteGestureController();
 
@@ -103,6 +121,7 @@ public class OpenGlRtspActivity extends AppCompatActivity
     super.onCreate(savedInstanceState);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     setContentView(R.layout.activity_open_gl);
+    folder = PathUtils.getRecordPath(this);
     openGlView = findViewById(R.id.surfaceView);
     button = findViewById(R.id.b_start_stop);
     button.setOnClickListener(this);
@@ -167,6 +186,11 @@ public class OpenGlRtspActivity extends AppCompatActivity
         return true;
       case R.id.cartoon:
         rtspCamera1.getGlInterface().setFilter(new CartoonFilterRender());
+        return true;
+      case R.id.chroma:
+        ChromaFilterRender chromaFilterRender = new ChromaFilterRender();
+        rtspCamera1.getGlInterface().setFilter(chromaFilterRender);
+        chromaFilterRender.setImage(BitmapFactory.decodeResource(getResources(), R.drawable.bg_chroma));
         return true;
       case R.id.circle:
         rtspCamera1.getGlInterface().setFilter(new CircleFilterRender());
@@ -328,6 +352,10 @@ public class OpenGlRtspActivity extends AppCompatActivity
     } catch (IOException e) {
       Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
     }
+  }
+
+  @Override
+  public void onConnectionStartedRtsp(@NotNull String rtspUrl) {
   }
 
   @Override

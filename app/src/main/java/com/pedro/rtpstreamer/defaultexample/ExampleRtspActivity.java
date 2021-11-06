@@ -1,8 +1,23 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtpstreamer.defaultexample;
 
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -14,7 +29,11 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.pedro.encoder.input.video.CameraOpenException;
 import com.pedro.rtplibrary.rtsp.RtspCamera1;
 import com.pedro.rtpstreamer.R;
+import com.pedro.rtpstreamer.utils.PathUtils;
 import com.pedro.rtsp.utils.ConnectCheckerRtsp;
+
+import org.jetbrains.annotations.NotNull;
+
 import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -35,14 +54,14 @@ public class ExampleRtspActivity extends AppCompatActivity
   private EditText etUrl;
 
   private String currentDateAndTime = "";
-  private File folder = new File(Environment.getExternalStorageDirectory().getAbsolutePath()
-      + "/rtmp-rtsp-stream-client-java");
+  private File folder;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     setContentView(R.layout.activity_example);
+    folder = PathUtils.getRecordPath(this);
     SurfaceView surfaceView = findViewById(R.id.surfaceView);
     button = findViewById(R.id.b_start_stop);
     button.setOnClickListener(this);
@@ -55,6 +74,10 @@ public class ExampleRtspActivity extends AppCompatActivity
     rtspCamera1 = new RtspCamera1(surfaceView, this);
     rtspCamera1.setReTries(10);
     surfaceView.getHolder().addCallback(this);
+  }
+
+  @Override
+  public void onConnectionStartedRtsp(@NotNull String rtspUrl) {
   }
 
   @Override
@@ -72,7 +95,7 @@ public class ExampleRtspActivity extends AppCompatActivity
     runOnUiThread(new Runnable() {
       @Override
       public void run() {
-        if (rtspCamera1.reTry(5000, reason)) {
+        if (rtspCamera1.reTry(5000, reason, null)) {
           Toast.makeText(ExampleRtspActivity.this, "Retry", Toast.LENGTH_SHORT)
               .show();
         } else {

@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.encoder.input.audio;
 
 import android.media.AudioFormat;
@@ -32,7 +48,7 @@ public class MicrophoneManager {
   private int channel = AudioFormat.CHANNEL_IN_STEREO;
   protected boolean muted = false;
   private AudioPostProcessEffect audioPostProcessEffect;
-  HandlerThread handlerThread;
+  protected HandlerThread handlerThread;
   protected CustomAudioEffect customAudioEffect = new NoAudioEffect();
 
   public MicrophoneManager(GetMicrophoneData getMicrophoneData) {
@@ -77,6 +93,9 @@ public class MicrophoneManager {
       if (echoCanceler) audioPostProcessEffect.enableEchoCanceler();
       if (noiseSuppressor) audioPostProcessEffect.enableNoiseSuppressor();
       String chl = (isStereo) ? "Stereo" : "Mono";
+      if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+        throw new IllegalArgumentException("Some parameters specified is not valid");
+      }
       Log.i(TAG, "Microphone created, " + sampleRate + "hz, " + chl);
       created = true;
     } catch (IllegalArgumentException e) {
@@ -114,6 +133,9 @@ public class MicrophoneManager {
         if (echoCanceler) audioPostProcessEffect.enableEchoCanceler();
         if (noiseSuppressor) audioPostProcessEffect.enableNoiseSuppressor();
         String chl = (isStereo) ? "Stereo" : "Mono";
+        if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+          throw new IllegalArgumentException("Some parameters specified is not valid");
+        }
         Log.i(TAG, "Internal microphone created, " + sampleRate + "hz, " + chl);
         created = true;
       } else {
@@ -177,12 +199,10 @@ public class MicrophoneManager {
   /**
    * @return Object with size and PCM buffer data
    */
-  private Frame read() {
+  protected Frame read() {
     pcmBuffer.rewind();
     int size = audioRecord.read(pcmBuffer, pcmBuffer.remaining());
-    if (size < 0) {
-      return null;
-    }
+    if (size < 0) return null;
     return new Frame(muted ? pcmBufferMuted : customAudioEffect.process(pcmBuffer.array()),
         muted ? 0 : pcmBuffer.arrayOffset(), size);
   }
@@ -207,8 +227,7 @@ public class MicrophoneManager {
       audioRecord = null;
     }
     if (audioPostProcessEffect != null) {
-      audioPostProcessEffect.releaseEchoCanceler();
-      audioPostProcessEffect.releaseNoiseSuppressor();
+      audioPostProcessEffect.release();
     }
     Log.i(TAG, "Microphone stopped");
   }

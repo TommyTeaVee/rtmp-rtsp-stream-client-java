@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.encoder;
 
 import android.media.MediaCodec;
@@ -19,17 +35,18 @@ import java.util.concurrent.BlockingQueue;
  */
 public abstract class BaseEncoder implements EncoderCallback {
 
-  private static final String TAG = "BaseEncoder";
-  private MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+  protected String TAG = "BaseEncoder";
+  private final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
   private HandlerThread handlerThread;
   protected BlockingQueue<Frame> queue = new ArrayBlockingQueue<>(80);
   protected MediaCodec codec;
-  protected long presentTimeUs;
+  protected static long presentTimeUs;
   protected volatile boolean running = false;
   protected boolean isBufferMode = true;
   protected CodecUtil.Force force = CodecUtil.Force.FIRST_COMPATIBLE_FOUND;
   private MediaCodec.Callback callback;
   private long oldTimeStamp = 0L;
+  protected boolean shouldReset = true;
 
   public void restart() {
     start(false);
@@ -37,6 +54,9 @@ public abstract class BaseEncoder implements EncoderCallback {
   }
 
   public void start() {
+    if (presentTimeUs == 0) {
+      presentTimeUs = System.nanoTime() / 1000;
+    }
     start(true);
     initCodec();
   }
@@ -59,6 +79,7 @@ public abstract class BaseEncoder implements EncoderCallback {
               getDataFromEncoder();
             } catch (IllegalStateException e) {
               Log.i(TAG, "Encoding error", e);
+              reloadCodec();
             }
           }
         }
@@ -66,6 +87,8 @@ public abstract class BaseEncoder implements EncoderCallback {
     }
     running = true;
   }
+
+  public abstract void reset();
 
   public abstract void start(boolean resetTs);
 
@@ -79,7 +102,22 @@ public abstract class BaseEncoder implements EncoderCallback {
     }
   }
 
+  private void reloadCodec() {
+    //Sometimes encoder crash, we will try recover it. Reset encoder a time if crash
+    if (shouldReset) {
+      Log.e(TAG, "Encoder crashed, trying to recover it");
+      reset();
+    }
+  }
+
   public void stop() {
+    stop(true);
+  }
+
+  public void stop(boolean resetTs) {
+    if (resetTs) {
+      presentTimeUs = 0;
+    }
     running = false;
     stopImp();
     if (handlerThread != null) {
@@ -142,13 +180,13 @@ public abstract class BaseEncoder implements EncoderCallback {
       Frame frame = getInputFrame();
       while (frame == null) frame = getInputFrame();
       byteBuffer.clear();
-      int size = Math.max(frame.getSize(), 0);
+      int size = Math.max(0, Math.min(frame.getSize(), byteBuffer.remaining()) - frame.getOffset());
       byteBuffer.put(frame.getBuffer(), frame.getOffset(), size);
       long pts = System.nanoTime() / 1000 - presentTimeUs;
       mediaCodec.queueInputBuffer(inBufferIndex, 0, size, pts, 0);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-    } catch (NullPointerException e) {
+    } catch (NullPointerException | IndexOutOfBoundsException e) {
       Log.i(TAG, "Encoding error", e);
     }
   }
@@ -207,6 +245,7 @@ public abstract class BaseEncoder implements EncoderCallback {
           inputAvailable(mediaCodec, inBufferIndex);
         } catch (IllegalStateException e) {
           Log.i(TAG, "Encoding error", e);
+          reloadCodec();
         }
       }
 
@@ -217,6 +256,7 @@ public abstract class BaseEncoder implements EncoderCallback {
           outputAvailable(mediaCodec, outBufferIndex, bufferInfo);
         } catch (IllegalStateException e) {
           Log.i(TAG, "Encoding error", e);
+          reloadCodec();
         }
       }
 

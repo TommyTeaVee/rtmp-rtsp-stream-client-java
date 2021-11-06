@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.encoder.input.gl.render;
 
 import android.content.Context;
@@ -63,7 +79,7 @@ public class CameraRender extends BaseRenderOffScreen {
     uSTMatrixHandle = GLES20.glGetUniformLocation(program, "uSTMatrix");
 
     //camera texture
-    GlUtil.createExternalTextures(1, textureID, 0);
+    GlUtil.createExternalTextures(textureID.length, textureID, 0);
     surfaceTexture = new SurfaceTexture(textureID[0]);
     surfaceTexture.setDefaultBufferSize(width, height);
     surface = new Surface(surfaceTexture);
@@ -107,8 +123,8 @@ public class CameraRender extends BaseRenderOffScreen {
   @Override
   public void release() {
     GLES20.glDeleteProgram(program);
-    surfaceTexture = null;
-    surface = null;
+    surfaceTexture.release();
+    surface.release();
   }
 
   public void updateTexImage() {

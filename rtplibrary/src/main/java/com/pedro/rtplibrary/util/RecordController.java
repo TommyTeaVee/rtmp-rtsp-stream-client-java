@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.util;
 
 import android.media.MediaCodec;
@@ -33,10 +49,11 @@ public class RecordController {
   //Pause/Resume
   private long pauseMoment = 0;
   private long pauseTime = 0;
-  private MediaCodec.BufferInfo videoInfo = new MediaCodec.BufferInfo();
-  private MediaCodec.BufferInfo audioInfo = new MediaCodec.BufferInfo();
+  private final MediaCodec.BufferInfo videoInfo = new MediaCodec.BufferInfo();
+  private final MediaCodec.BufferInfo audioInfo = new MediaCodec.BufferInfo();
   private String videoMime = CodecUtil.H264_MIME;
   private boolean isOnlyAudio = false;
+  private boolean isOnlyVideo = false;
 
   public enum Status {
     STARTED, STOPPED, RECORDING, PAUSED, RESUMED
@@ -145,7 +162,7 @@ public class RecordController {
 
   @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
   private void init() {
-    audioTrack = mediaMuxer.addTrack(audioFormat);
+    if (!isOnlyVideo) audioTrack = mediaMuxer.addTrack(audioFormat);
     mediaMuxer.start();
     status = Status.RECORDING;
     if (listener != null) listener.onStatusChange(status);
@@ -153,7 +170,7 @@ public class RecordController {
 
   @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
   public void recordVideo(ByteBuffer videoBuffer, MediaCodec.BufferInfo videoInfo) {
-    if (status == Status.STARTED && videoFormat != null && audioFormat != null) {
+    if (status == Status.STARTED && videoFormat != null && (audioFormat != null || isOnlyVideo)) {
       if (videoInfo.flags == MediaCodec.BUFFER_FLAG_KEY_FRAME || isKeyFrame(videoBuffer)) {
         videoTrack = mediaMuxer.addTrack(videoFormat);
         init();
@@ -177,8 +194,9 @@ public class RecordController {
     }
   }
 
-  public void setVideoFormat(MediaFormat videoFormat) {
+  public void setVideoFormat(MediaFormat videoFormat, boolean isOnlyVideo) {
     this.videoFormat = videoFormat;
+    this.isOnlyVideo = isOnlyVideo;
   }
 
   public void setAudioFormat(MediaFormat audioFormat, boolean isOnlyAudio) {
@@ -188,6 +206,10 @@ public class RecordController {
         && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
       init();
     }
+  }
+
+  public void setVideoFormat(MediaFormat videoFormat) {
+    setVideoFormat(videoFormat, false);
   }
 
   public void setAudioFormat(MediaFormat audioFormat) {

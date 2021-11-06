@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.view;
 
 import android.graphics.SurfaceTexture;
@@ -50,17 +66,59 @@ public interface GlInterface {
   void takePhoto(TakePhotoCallback takePhotoCallback);
 
   /**
-   * Set a filter to stream.
-   * You can select any filter from {@link com.pedro.encoder.input.gl.render.filters} or create
-   * your own filter if you extends from {@link com.pedro.encoder.input.gl.render.filters.BaseFilterRender}
+   * Replaces the filter at the specified position with the specified filter.
+   * You can modify filter's parameters after set it to stream.
    *
-   * @param baseFilterRender filter to set. You can modify parameters to filter after set it to stream.
+   * @param filterPosition filter position
+   * @param baseFilterRender filter to set
    */
   void setFilter(int filterPosition, BaseFilterRender baseFilterRender);
 
   /**
-   * Set filter in position 0.
-   * @param baseFilterRender filter to set. You can modify parameters to filter after set it to stream.
+   * Appends the specified filter to the end.
+   * You can modify filter's parameters after set it to stream.
+   *
+   * @param baseFilterRender filter to add
+   */
+  void addFilter(BaseFilterRender baseFilterRender);
+
+  /**
+   * Inserts the specified filter at the specified position.
+   * You can modify filter's parameters after set it to stream.
+   *
+   * @param filterPosition filter position
+   * @param baseFilterRender filter to set
+   */
+  void addFilter(int filterPosition, BaseFilterRender baseFilterRender);
+
+  /**
+   * Remove all filters
+   */
+  void clearFilters();
+
+  /**
+   * Remove the filter at the specified position.
+   *
+   * @param filterPosition position of filter to remove
+   */
+  void removeFilter(int filterPosition);
+
+  /**
+   * Removes the first occurrence of the specified element from this list, if it is present.
+   *
+   * @param baseFilterRender filter to remove
+   */
+  void removeFilter(BaseFilterRender baseFilterRender);
+  /**
+   * @return number of filters
+   */
+  int filtersCount();
+
+  /**
+   * Replace the filter in position 0 or add the filter if list is empty.
+   * You can modify filter's parameters after set it to stream.
+   *
+   * @param baseFilterRender filter to set.
    */
   void setFilter(BaseFilterRender baseFilterRender);
   
@@ -87,6 +145,16 @@ public interface GlInterface {
    * When true, flips only the stream vertically
    */
   void setIsStreamVerticalFlip(boolean flip);
+
+  /**
+   * When true, flips only the preview horizontally
+   */
+  void setIsPreviewHorizontalFlip(boolean flip);
+
+  /**
+   * When true, flips only the preview vertically
+   */
+  void setIsPreviewVerticalFlip(boolean flip);
 
   /**
    * Get Anti alias is enabled.

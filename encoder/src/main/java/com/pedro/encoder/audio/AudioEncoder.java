@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.encoder.audio;
 
 import android.media.MediaCodec;
@@ -10,11 +26,8 @@ import com.pedro.encoder.Frame;
 import com.pedro.encoder.GetFrame;
 import com.pedro.encoder.input.audio.GetMicrophoneData;
 import com.pedro.encoder.utils.CodecUtil;
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Created by pedro on 19/01/17.
@@ -24,8 +37,7 @@ import java.util.concurrent.TimeUnit;
 
 public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
 
-  private static final String TAG = "AudioEncoder";
-  private GetAacData getAacData;
+  private final GetAacData getAacData;
   private int bitRate = 64 * 1024;  //in kbps
   private int sampleRate = 32000; //in hz
   private int maxInputSize = 0;
@@ -34,6 +46,7 @@ public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
 
   public AudioEncoder(GetAacData getAacData) {
     this.getAacData = getAacData;
+    TAG = "AudioEncoder";
   }
 
   /**
@@ -49,6 +62,7 @@ public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
     try {
       MediaCodecInfo encoder = chooseEncoder(CodecUtil.AAC_MIME);
       if (encoder != null) {
+        Log.i(TAG, "Encoder selected " + encoder.getName());
         codec = MediaCodec.createByCodecName(encoder.getName());
       } else {
         Log.e(TAG, "Valid encoder not found");
@@ -66,8 +80,9 @@ public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
       running = false;
       Log.i(TAG, "prepared");
       return true;
-    } catch (IOException | IllegalStateException e) {
+    } catch (Exception e) {
       Log.e(TAG, "Create AudioEncoder failed.", e);
+      this.stop();
       return false;
     }
   }
@@ -85,9 +100,7 @@ public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
 
   @Override
   public void start(boolean resetTs) {
-    if (resetTs) {
-      presentTimeUs = System.nanoTime() / 1000;
-    }
+    shouldReset = resetTs;
     Log.i(TAG, "started");
   }
 
@@ -96,8 +109,9 @@ public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
     Log.i(TAG, "stopped");
   }
 
+  @Override
   public void reset() {
-    stop();
+    stop(false);
     prepareAudioEncoder(bitRate, sampleRate, isStereo, maxInputSize);
     restart();
   }
@@ -133,31 +147,27 @@ public class AudioEncoder extends BaseEncoder implements GetMicrophoneData {
 
   @Override
   protected MediaCodecInfo chooseEncoder(String mime) {
-    List<MediaCodecInfo> encoders = new ArrayList<>();
+    List<MediaCodecInfo> mediaCodecInfoList;
     if (force == CodecUtil.Force.HARDWARE) {
-      encoders = CodecUtil.getAllHardwareEncoders(CodecUtil.AAC_MIME);
+      mediaCodecInfoList = CodecUtil.getAllHardwareEncoders(CodecUtil.AAC_MIME);
     } else if (force == CodecUtil.Force.SOFTWARE) {
-      encoders = CodecUtil.getAllSoftwareEncoders(CodecUtil.AAC_MIME);
+      mediaCodecInfoList = CodecUtil.getAllSoftwareEncoders(CodecUtil.AAC_MIME);
+    } else {
+      //Priority: hardware > software
+      mediaCodecInfoList = CodecUtil.getAllEncoders(CodecUtil.AAC_MIME, true);
     }
 
-    if (force == CodecUtil.Force.FIRST_COMPATIBLE_FOUND) {
-      List<MediaCodecInfo> mediaCodecInfoList = CodecUtil.getAllEncoders(mime);
-      for (MediaCodecInfo mediaCodecInfo : mediaCodecInfoList) {
-        String name = mediaCodecInfo.getName().toLowerCase();
-        if (!name.contains("omx.google")) return mediaCodecInfo;
+    Log.i(TAG, mediaCodecInfoList.size() + " encoders found");
+    for (MediaCodecInfo mci : mediaCodecInfoList) {
+      String name = mci.getName().toLowerCase();
+      Log.i(TAG, "Encoder " + mci.getName());
+      if (name.contains("omx.google") && mediaCodecInfoList.size() > 1) {
+        //skip omx.google.aac.encoder if possible
+        continue;
       }
-      if (mediaCodecInfoList.size() > 0) {
-        return mediaCodecInfoList.get(0);
-      } else {
-        return null;
-      }
-    } else {
-      if (encoders.isEmpty()) {
-        return null;
-      } else {
-        return encoders.get(0);
-      }
+      return mci;
     }
+    return null;
   }
 
   public void setSampleRate(int sampleRate) {

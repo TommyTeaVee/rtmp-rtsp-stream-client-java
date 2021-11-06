@@ -1,8 +1,25 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.encoder.input.video;
 
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.ImageFormat;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.CamcorderProfile;
@@ -10,9 +27,11 @@ import android.util.Log;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.TextureView;
+import android.view.View;
 
 import com.pedro.encoder.Frame;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -39,11 +58,11 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
   private GetCameraData getCameraData;
   private boolean running = false;
   private boolean lanternEnable = false;
+  private boolean videoStabilizationEnable = false;
   private boolean autoFocusEnabled = false;
   private int cameraSelect;
-  private boolean isFrontCamera = false;
+  private CameraHelper.Facing facing = CameraHelper.Facing.BACK;
   private boolean isPortrait = false;
-  private int cameraFacing = Camera.CameraInfo.CAMERA_FACING_BACK;
   private Context context;
 
   //default parameters for camera
@@ -57,12 +76,16 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
   private List<Camera.Size> previewSizeFront;
   private float distance;
   private CameraCallbacks cameraCallbacks;
+  private final int focusAreaSize = 100;
 
   //Face detector
   public interface FaceDetectorCallback {
-    void onGetFaces(Camera.Face[] faces);
+    void onGetFaces(Camera.Face[] faces, Rect scaleSensor, int sensorOrientation);
   }
 
+  private final int sensorOrientation = 0;
+  //Value obtained from Camera.Face documentation api about bounds
+  private final Rect faceSensorScale = new Rect(-1000, -1000, 1000, 1000);
   private FaceDetectorCallback faceDetectorCallback;
 
   public Camera1ApiManager(SurfaceView surfaceView, GetCameraData getCameraData) {
@@ -108,22 +131,22 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
     return height;
   }
 
+  public void setCameraFacing(CameraHelper.Facing cameraFacing) {
+    facing = cameraFacing;
+  }
+
   public void start(CameraHelper.Facing cameraFacing, int width, int height, int fps) {
     int facing = cameraFacing == CameraHelper.Facing.BACK ? Camera.CameraInfo.CAMERA_FACING_BACK
         : Camera.CameraInfo.CAMERA_FACING_FRONT;
     this.width = width;
     this.height = height;
     this.fps = fps;
-    this.cameraFacing = facing;
     cameraSelect =
         facing == Camera.CameraInfo.CAMERA_FACING_BACK ? selectCameraBack() : selectCameraFront();
     start();
   }
 
   public void start(int width, int height, int fps) {
-    CameraHelper.Facing facing =
-        cameraFacing == Camera.CameraInfo.CAMERA_FACING_BACK ? CameraHelper.Facing.BACK
-            : CameraHelper.Facing.FRONT;
     start(facing, width, height, fps);
   }
 
@@ -136,7 +159,7 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
       camera = Camera.open(cameraSelect);
       Camera.CameraInfo info = new Camera.CameraInfo();
       Camera.getCameraInfo(cameraSelect, info);
-      isFrontCamera = info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT;
+      facing = info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT ? CameraHelper.Facing.FRONT : CameraHelper.Facing.BACK;
       isPortrait = context.getResources().getConfiguration().orientation
           == Configuration.ORIENTATION_PORTRAIT;
       Camera.Parameters parameters = camera.getParameters();
@@ -174,7 +197,7 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
       camera.startPreview();
       running = true;
       if (cameraCallbacks != null) {
-        cameraCallbacks.onCameraChanged(isFrontCamera);
+        cameraCallbacks.onCameraChanged(facing);
       }
       Log.i(TAG, width + "X" + height);
     } catch (IOException e) {
@@ -218,6 +241,40 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
     } catch (Exception e) {
       Log.e(TAG, "Error", e);
     }
+  }
+
+  public void setExposure(int value) {
+    if (camera != null && camera.getParameters() != null) {
+      android.hardware.Camera.Parameters params = camera.getParameters();
+      if (value > params.getMaxExposureCompensation()) value = params.getMaxExposureCompensation();
+      else if (value < params.getMinExposureCompensation()) value = params.getMinExposureCompensation();
+      params.setExposureCompensation(value);
+      camera.setParameters(params);
+    }
+  }
+
+  public int getExposure() {
+    if (camera != null && camera.getParameters() != null) {
+      android.hardware.Camera.Parameters params = camera.getParameters();
+      return params.getExposureCompensation();
+    }
+    return 0;
+  }
+
+  public int getMaxExposure() {
+    if (camera != null && camera.getParameters() != null) {
+      android.hardware.Camera.Parameters params = camera.getParameters();
+      return params.getMaxExposureCompensation();
+    }
+    return 0;
+  }
+
+  public int getMinExposure() {
+    if (camera != null && camera.getParameters() != null) {
+      android.hardware.Camera.Parameters params = camera.getParameters();
+      return params.getMinExposureCompensation();
+    }
+    return 0;
   }
 
   private int selectCameraBack() {
@@ -271,7 +328,7 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
 
   @Override
   public void onPreviewFrame(byte[] data, Camera camera) {
-    getCameraData.inputYUVData(new Frame(data, rotation, isFrontCamera && isPortrait, imageFormat));
+    getCameraData.inputYUVData(new Frame(data, rotation, facing == CameraHelper.Facing.FRONT && isPortrait, imageFormat));
     camera.addCallbackBuffer(yuvBuffer);
   }
 
@@ -344,8 +401,8 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
     }
   }
 
-  public boolean isFrontCamera() {
-    return isFrontCamera;
+  public CameraHelper.Facing getCameraFacing() {
+    return facing;
   }
 
   public void switchCamera() throws CameraOpenException {
@@ -360,8 +417,6 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
             throw new CameraOpenException("This camera resolution cant be opened");
           }
           stop();
-          cameraFacing = cameraFacing == Camera.CameraInfo.CAMERA_FACING_BACK
-              ? Camera.CameraInfo.CAMERA_FACING_FRONT : Camera.CameraInfo.CAMERA_FACING_BACK;
           start();
           return;
         }
@@ -436,6 +491,36 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
       lanternEnable = false;
     }
   }
+  
+  private Camera.AutoFocusCallback autoFocusTakePictureCallback = new Camera.AutoFocusCallback() {
+    @Override
+    public void onAutoFocus(boolean success, Camera camera) {
+      if (success) {
+        Log.i(TAG, "tapToFocus success");
+      } else {
+        Log.e(TAG, "tapToFocus failed");
+      }
+    }
+  };
+
+  public void tapToFocus(View view, MotionEvent event) {
+    if (camera != null && camera.getParameters() != null) {
+      Camera.Parameters parameters = camera.getParameters();
+      if (parameters.getMaxNumMeteringAreas() > 0) {
+        Rect rect = calculateFocusArea(event.getX(), event.getY(), view.getWidth(), view.getHeight());
+        parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+        List<Camera.Area> meteringAreas = new ArrayList<>();
+        meteringAreas.add(new Camera.Area(rect, 800));
+        parameters.setFocusAreas(meteringAreas);
+        try {
+          camera.setParameters(parameters);
+        }catch (Exception e) {
+          Log.i(TAG, "tapToFocus error: " + e.getMessage());
+        }
+      }
+      camera.autoFocus(autoFocusTakePictureCallback);
+    }
+  }
 
   public void enableAutoFocus() {
     if (camera != null) {
@@ -493,11 +578,20 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
     }
   }
 
-  public void enableFaceDetection(FaceDetectorCallback faceDetectorCallback) {
-    if (camera != null) {
-      this.faceDetectorCallback = faceDetectorCallback;
-      camera.setFaceDetectionListener(this);
-      camera.startFaceDetection();
+  public boolean enableFaceDetection(FaceDetectorCallback faceDetectorCallback) {
+    try {
+      if (camera != null) {
+        this.faceDetectorCallback = faceDetectorCallback;
+        camera.setFaceDetectionListener(this);
+        camera.startFaceDetection();
+        return true;
+      } else {
+        Log.e(TAG, "face detection called with camera stopped");
+        return false;
+      }
+    } catch (IllegalArgumentException e) {
+      Log.e(TAG, "face detection unsupported");
+      return false;
     }
   }
 
@@ -507,6 +601,31 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
       camera.stopFaceDetection();
       camera.setFaceDetectionListener(null);
     }
+  }
+
+  public boolean enableVideoStabilization() {
+    if (camera != null) {
+      Camera.Parameters parameters = camera.getParameters();
+      if (parameters.isVideoStabilizationSupported()) {
+        parameters.setVideoStabilization(true);
+        videoStabilizationEnable = true;
+      }
+    }
+    return videoStabilizationEnable;
+  }
+
+  public void disableVideoStabilization() {
+    if (camera != null) {
+      Camera.Parameters parameters = camera.getParameters();
+      if (parameters.isVideoStabilizationSupported()) {
+        parameters.setVideoStabilization(false);
+        videoStabilizationEnable = false;
+      }
+    }
+  }
+
+  public boolean isVideoStabilizationEnabled() {
+    return videoStabilizationEnable;
   }
 
   public void setCameraCallbacks(CameraCallbacks cameraCallbacks) {
@@ -519,6 +638,26 @@ public class Camera1ApiManager implements Camera.PreviewCallback, Camera.FaceDet
 
   @Override
   public void onFaceDetection(Camera.Face[] faces, Camera camera) {
-    if (faceDetectorCallback != null) faceDetectorCallback.onGetFaces(faces);
+    if (faceDetectorCallback != null) faceDetectorCallback.onGetFaces(faces, faceSensorScale, sensorOrientation);
+  }
+
+  private Rect calculateFocusArea(float x, float y, float previewWidth, float previewHeight) {
+    int left = clamp((int) (x / previewWidth * 2000f - 1000f), focusAreaSize);
+    int top = clamp((int) (y / previewHeight * 2000f - 1000f), focusAreaSize);
+    return new Rect(left, top, left + focusAreaSize, top + focusAreaSize);
+  }
+
+  private int clamp(int touchCoordinateInCameraReper, int focusAreaSize) {
+    int result;
+    if (Math.abs(touchCoordinateInCameraReper) + focusAreaSize / 2 > 1000){
+      if (touchCoordinateInCameraReper > 0){
+        result = 1000 - focusAreaSize / 2;
+      } else {
+        result = -1000 + focusAreaSize / 2;
+      }
+    } else{
+      result = touchCoordinateInCameraReper - focusAreaSize / 2;
+    }
+    return result;
   }
 }

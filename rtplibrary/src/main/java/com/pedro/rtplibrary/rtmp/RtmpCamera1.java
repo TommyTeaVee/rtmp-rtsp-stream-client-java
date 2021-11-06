@@ -1,17 +1,37 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.rtmp;
 
 import android.content.Context;
 import android.media.MediaCodec;
 import android.os.Build;
+
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import android.view.SurfaceView;
 import android.view.TextureView;
+
+import com.pedro.rtmp.flv.video.ProfileIop;
+import com.pedro.rtmp.rtmp.RtmpClient;
+import com.pedro.rtmp.utils.ConnectCheckerRtmp;
 import com.pedro.rtplibrary.base.Camera1Base;
 import com.pedro.rtplibrary.view.LightOpenGlView;
 import com.pedro.rtplibrary.view.OpenGlView;
 import java.nio.ByteBuffer;
-import net.ossrs.rtmp.ConnectCheckerRtmp;
-import net.ossrs.rtmp.SrsFlvMuxer;
 
 /**
  * More documentation see:
@@ -22,34 +42,34 @@ import net.ossrs.rtmp.SrsFlvMuxer;
 
 public class RtmpCamera1 extends Camera1Base {
 
-  private SrsFlvMuxer srsFlvMuxer;
+  private final RtmpClient rtmpClient;
 
   public RtmpCamera1(SurfaceView surfaceView, ConnectCheckerRtmp connectChecker) {
     super(surfaceView);
-    srsFlvMuxer = new SrsFlvMuxer(connectChecker);
+    rtmpClient = new RtmpClient(connectChecker);
   }
 
   public RtmpCamera1(TextureView textureView, ConnectCheckerRtmp connectChecker) {
     super(textureView);
-    srsFlvMuxer = new SrsFlvMuxer(connectChecker);
+    rtmpClient = new RtmpClient(connectChecker);
   }
 
   @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
   public RtmpCamera1(OpenGlView openGlView, ConnectCheckerRtmp connectChecker) {
     super(openGlView);
-    srsFlvMuxer = new SrsFlvMuxer(connectChecker);
+    rtmpClient = new RtmpClient(connectChecker);
   }
 
   @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
   public RtmpCamera1(LightOpenGlView lightOpenGlView, ConnectCheckerRtmp connectChecker) {
     super(lightOpenGlView);
-    srsFlvMuxer = new SrsFlvMuxer(connectChecker);
+    rtmpClient = new RtmpClient(connectChecker);
   }
 
   @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
   public RtmpCamera1(Context context, ConnectCheckerRtmp connectChecker) {
     super(context);
-    srsFlvMuxer = new SrsFlvMuxer(connectChecker);
+    rtmpClient = new RtmpClient(connectChecker);
   }
 
   /**
@@ -57,63 +77,63 @@ public class RtmpCamera1 extends Camera1Base {
    *
    * @param profileIop Could be ProfileIop.BASELINE or ProfileIop.CONSTRAINED
    */
-  public void setProfileIop(byte profileIop) {
-    srsFlvMuxer.setProfileIop(profileIop);
+  public void setProfileIop(ProfileIop profileIop) {
+    rtmpClient.setProfileIop(profileIop);
   }
 
   @Override
   public void resizeCache(int newSize) throws RuntimeException {
-    srsFlvMuxer.resizeFlvTagCache(newSize);
+    rtmpClient.resizeCache(newSize);
   }
 
   @Override
   public int getCacheSize() {
-    return srsFlvMuxer.getFlvTagCacheSize();
+    return rtmpClient.getCacheSize();
   }
 
   @Override
   public long getSentAudioFrames() {
-    return srsFlvMuxer.getSentAudioFrames();
+    return rtmpClient.getSentAudioFrames();
   }
 
   @Override
   public long getSentVideoFrames() {
-    return srsFlvMuxer.getSentVideoFrames();
+    return rtmpClient.getSentVideoFrames();
   }
 
   @Override
   public long getDroppedAudioFrames() {
-    return srsFlvMuxer.getDroppedAudioFrames();
+    return rtmpClient.getDroppedAudioFrames();
   }
 
   @Override
   public long getDroppedVideoFrames() {
-    return srsFlvMuxer.getDroppedVideoFrames();
+    return rtmpClient.getDroppedVideoFrames();
   }
 
   @Override
   public void resetSentAudioFrames() {
-    srsFlvMuxer.resetSentAudioFrames();
+    rtmpClient.resetSentAudioFrames();
   }
 
   @Override
   public void resetSentVideoFrames() {
-    srsFlvMuxer.resetSentVideoFrames();
+    rtmpClient.resetSentVideoFrames();
   }
 
   @Override
   public void resetDroppedAudioFrames() {
-    srsFlvMuxer.resetDroppedAudioFrames();
+    rtmpClient.resetDroppedAudioFrames();
   }
 
   @Override
   public void resetDroppedVideoFrames() {
-    srsFlvMuxer.resetDroppedVideoFrames();
+    rtmpClient.resetDroppedVideoFrames();
   }
 
   @Override
   public void setAuthorization(String user, String password) {
-    srsFlvMuxer.setAuthorization(user, password);
+    rtmpClient.setAuthorization(user, password);
   }
 
   /**
@@ -124,67 +144,88 @@ public class RtmpCamera1 extends Camera1Base {
    * https://learn.akamai.com/en-us/webhelp/media-services-live/media-services-live-encoder-compatibility-testing-and-qualification-guide-v4.0/GUID-F941C88B-9128-4BF4-A81B-C2E5CFD35BBF.html
    */
   public void forceAkamaiTs(boolean enabled) {
-    srsFlvMuxer.forceAkamaiTs(enabled);
+    rtmpClient.forceAkamaiTs(enabled);
+  }
+
+  /**
+   * Must be called before start stream.
+   *
+   * Default value 128
+   * Range value: 1 to 16777215.
+   *
+   * The most common values example: 128, 4096, 65535
+   *
+   * @param chunkSize packet's chunk size send to server
+   */
+  public void setWriteChunkSize(int chunkSize) {
+    if (!isStreaming()) {
+      rtmpClient.setWriteChunkSize(chunkSize);
+    }
   }
 
   @Override
   protected void prepareAudioRtp(boolean isStereo, int sampleRate) {
-    srsFlvMuxer.setIsStereo(isStereo);
-    srsFlvMuxer.setSampleRate(sampleRate);
+    rtmpClient.setAudioInfo(sampleRate, isStereo);
   }
 
   @Override
   protected void startStreamRtp(String url) {
     if (videoEncoder.getRotation() == 90 || videoEncoder.getRotation() == 270) {
-      srsFlvMuxer.setVideoResolution(videoEncoder.getHeight(), videoEncoder.getWidth());
+      rtmpClient.setVideoResolution(videoEncoder.getHeight(), videoEncoder.getWidth());
     } else {
-      srsFlvMuxer.setVideoResolution(videoEncoder.getWidth(), videoEncoder.getHeight());
+      rtmpClient.setVideoResolution(videoEncoder.getWidth(), videoEncoder.getHeight());
     }
-    srsFlvMuxer.start(url);
+    rtmpClient.setFps(videoEncoder.getFps());
+    rtmpClient.connect(url);
   }
 
   @Override
   protected void stopStreamRtp() {
-    srsFlvMuxer.stop();
+    rtmpClient.disconnect();
   }
 
   @Override
   public void setReTries(int reTries) {
-    srsFlvMuxer.setReTries(reTries);
+    rtmpClient.setReTries(reTries);
   }
 
   @Override
-  public boolean shouldRetry(String reason) {
-    return srsFlvMuxer.shouldRetry(reason);
+  protected boolean shouldRetry(String reason) {
+    return rtmpClient.shouldRetry(reason);
   }
 
   @Override
-  public void reConnect(long delay) {
-    srsFlvMuxer.reConnect(delay);
+  public void reConnect(long delay, @Nullable String backupUrl) {
+    rtmpClient.reConnect(delay, backupUrl);
   }
 
   @Override
   public boolean hasCongestion() {
-    return srsFlvMuxer.hasCongestion();
+    return rtmpClient.hasCongestion();
   }
 
   @Override
   protected void getAacDataRtp(ByteBuffer aacBuffer, MediaCodec.BufferInfo info) {
-    srsFlvMuxer.sendAudio(aacBuffer, info);
+    rtmpClient.sendAudio(aacBuffer, info);
   }
 
   @Override
   protected void onSpsPpsVpsRtp(ByteBuffer sps, ByteBuffer pps, ByteBuffer vps) {
-    srsFlvMuxer.setSpsPPs(sps, pps);
+    rtmpClient.setVideoInfo(sps, pps, vps);
   }
 
   @Override
   protected void getH264DataRtp(ByteBuffer h264Buffer, MediaCodec.BufferInfo info) {
-    srsFlvMuxer.sendVideo(h264Buffer, info);
+    rtmpClient.sendVideo(h264Buffer, info);
   }
 
   @Override
   public void setLogs(boolean enable) {
-    srsFlvMuxer.setLogs(enable);
+    rtmpClient.setLogs(enable);
+  }
+
+  @Override
+  public void setCheckServerAlive(boolean enable) {
+    rtmpClient.setCheckServerAlive(enable);
   }
 }

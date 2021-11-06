@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.view;
 
 import android.content.Context;
@@ -11,6 +27,8 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import com.pedro.encoder.input.gl.SurfaceManager;
 import com.pedro.encoder.input.video.FpsLimiter;
+import com.pedro.rtplibrary.util.Filter;
+
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -31,11 +49,11 @@ public abstract class OpenGlViewBase extends SurfaceView
   protected boolean running = false;
   protected boolean initialized = false;
 
-  protected SurfaceManager surfaceManagerPhoto = null;
-  protected SurfaceManager surfaceManager = null;
-  protected SurfaceManager surfaceManagerEncoder = null;
+  protected final SurfaceManager surfaceManagerPhoto = new SurfaceManager();
+  protected final SurfaceManager surfaceManager = new SurfaceManager();
+  protected final SurfaceManager surfaceManagerEncoder = new SurfaceManager();
 
-  protected FpsLimiter fpsLimiter = new FpsLimiter();
+  protected final FpsLimiter fpsLimiter = new FpsLimiter();
   protected final Semaphore semaphore = new Semaphore(0);
   protected final BlockingQueue<Filter> filterQueue = new LinkedBlockingQueue<>();
   protected final Object sync = new Object();
@@ -44,6 +62,8 @@ public abstract class OpenGlViewBase extends SurfaceView
   protected TakePhotoCallback takePhotoCallback;
   protected int streamRotation;
   protected boolean muteVideo = false;
+  protected boolean isPreviewHorizontalFlip = false;
+  protected boolean isPreviewVerticalFlip = false;
   protected boolean isStreamHorizontalFlip = false;
   protected boolean isStreamVerticalFlip = false;
   protected boolean forceRender = false;
@@ -76,6 +96,16 @@ public abstract class OpenGlViewBase extends SurfaceView
   @Override
   public void setIsStreamVerticalFlip(boolean flip) {
     isStreamVerticalFlip = flip;
+  }
+
+  @Override
+  public void setIsPreviewHorizontalFlip(boolean flip) {
+    isPreviewHorizontalFlip = flip;
+  }
+
+  @Override
+  public void setIsPreviewVerticalFlip(boolean flip) {
+    isPreviewVerticalFlip = flip;
   }
 
   @Override
@@ -115,24 +145,21 @@ public abstract class OpenGlViewBase extends SurfaceView
   @Override
   public void addMediaCodecSurface(Surface surface) {
     synchronized (sync) {
-      if (surfaceManagerPhoto != null) {
+      if (surfaceManager.isReady()) {
         surfaceManagerPhoto.release();
-        surfaceManagerPhoto = null;
+        surfaceManagerEncoder.release();
+        surfaceManagerEncoder.eglSetup(surface, surfaceManager);
+        surfaceManagerPhoto.eglSetup(encoderWidth, encoderHeight, surfaceManagerEncoder);
       }
-      surfaceManagerEncoder = new SurfaceManager(surface, surfaceManager);
     }
   }
 
   @Override
   public void removeMediaCodecSurface() {
     synchronized (sync) {
-      if (surfaceManagerEncoder != null) {
-        surfaceManagerEncoder.release();
-        surfaceManagerEncoder = null;
-      }
-      if (surfaceManagerPhoto == null && surfaceManager != null) {
-        surfaceManagerPhoto = new SurfaceManager(encoderWidth, encoderHeight, surfaceManager);
-      }
+      surfaceManagerPhoto.release();
+      surfaceManagerEncoder.release();
+      surfaceManagerPhoto.eglSetup(encoderWidth, encoderHeight, surfaceManager);
     }
   }
 
@@ -156,6 +183,7 @@ public abstract class OpenGlViewBase extends SurfaceView
   @Override
   public void stop() {
     synchronized (sync) {
+      running = false;
       if (thread != null) {
         thread.interrupt();
         try {
@@ -165,18 +193,9 @@ public abstract class OpenGlViewBase extends SurfaceView
         }
         thread = null;
       }
-      running = false;
-    }
-  }
-
-  protected void releaseSurfaceManager() {
-    if (surfaceManager != null) {
-      surfaceManager.release();
-      surfaceManager = null;
-    }
-    if (surfaceManagerPhoto != null) {
       surfaceManagerPhoto.release();
-      surfaceManagerPhoto = null;
+      surfaceManagerEncoder.release();
+      surfaceManager.release();
     }
   }
 

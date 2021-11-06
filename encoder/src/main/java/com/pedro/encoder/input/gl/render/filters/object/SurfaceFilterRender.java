@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.encoder.input.gl.render.filters.object;
 
 import android.content.Context;
@@ -8,6 +24,9 @@ import android.opengl.GLES20;
 import android.opengl.Matrix;
 import android.os.Build;
 import androidx.annotation.RequiresApi;
+
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Surface;
 import com.pedro.encoder.R;
 import com.pedro.encoder.input.gl.Sprite;
@@ -92,11 +111,18 @@ public class SurfaceFilterRender extends BaseObjectFilterRender {
     uSamplerSurfaceHandle = GLES20.glGetUniformLocation(program, "uSamplerSurface");
     uAlphaHandle = GLES20.glGetUniformLocation(program, "uAlpha");
 
-    GlUtil.createExternalTextures(1, surfaceId, 0);
+    GlUtil.createExternalTextures(surfaceId.length, surfaceId, 0);
     surfaceTexture = new SurfaceTexture(surfaceId[0]);
     surfaceTexture.setDefaultBufferSize(getWidth(), getHeight());
     surface = new Surface(surfaceTexture);
-    if (surfaceReadyCallback != null) surfaceReadyCallback.surfaceReady(surfaceTexture);
+    if (surfaceReadyCallback != null) {
+      new Handler(Looper.getMainLooper()).post(new Runnable() {
+        @Override
+        public void run() {
+          surfaceReadyCallback.surfaceReady(surfaceTexture);
+        }
+      });
+    }
   }
 
   @Override
@@ -142,10 +168,16 @@ public class SurfaceFilterRender extends BaseObjectFilterRender {
     surface.release();
   }
 
+  /**
+   * This texture must be renderer using an api called on main thread to avoid possible errors
+   */
   public SurfaceTexture getSurfaceTexture() {
     return surfaceTexture;
   }
 
+  /**
+   * This surface must be renderer using an api called on main thread to avoid possible errors
+   */
   public Surface getSurface() {
     return surface;
   }

@@ -1,37 +1,40 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtsp.utils
 
 import java.io.UnsupportedEncodingException
 import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
-import kotlin.experimental.and
 
-/**
- * Created by pedro on 22/02/17.
- */
-internal object AuthUtil {
-
-  private val hexArray = charArrayOf('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f')
+object AuthUtil {
 
   @JvmStatic
   fun getMd5Hash(buffer: String): String {
     val md: MessageDigest
     try {
       md = MessageDigest.getInstance("MD5")
-      return bytesToHex(md.digest(buffer.toByteArray(charset("UTF-8"))))
+      return bytesToHex(md.digest(buffer.toByteArray()))
     } catch (ignore: NoSuchAlgorithmException) {
     } catch (ignore: UnsupportedEncodingException) {
     }
     return ""
   }
 
-  private fun bytesToHex(bytes: ByteArray): String {
-    val hexChars = CharArray(bytes.size * 2)
-    var v: Int
-    for (j in bytes.indices) {
-      v = (bytes[j] and 0xFF.toByte()).toInt()
-      hexChars[j * 2] = hexArray[(v).ushr(4)]
-      hexChars[j * 2 + 1] = hexArray[v and 0x0F]
-    }
-    return String(hexChars)
+  private fun bytesToHex(raw: ByteArray): String {
+    return raw.joinToString("") { "%02x".format(it) }
   }
 }

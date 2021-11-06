@@ -1,7 +1,24 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.base;
 
 import android.media.MediaCodec;
 import android.media.MediaFormat;
+import android.media.MediaRecorder;
 import android.os.Build;
 
 import androidx.annotation.NonNull;
@@ -28,7 +45,7 @@ import java.nio.ByteBuffer;
  */
 public abstract class OnlyAudioBase implements GetAacData, GetMicrophoneData {
 
-  protected RecordController recordController;
+  private final RecordController recordController;
   private MicrophoneManager microphoneManager;
   private AudioEncoder audioEncoder;
   private boolean streaming = false;
@@ -88,14 +105,20 @@ public abstract class OnlyAudioBase implements GetAacData, GetMicrophoneData {
    * @return true if success, false if you get a error (Normally because the encoder selected
    * doesn't support any configuration seated or your device hasn't a AAC encoder).
    */
-  public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
+  public boolean prepareAudio(int audioSource, int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
       boolean noiseSuppressor) {
-    if (!microphoneManager.createMicrophone(sampleRate, isStereo, echoCanceler, noiseSuppressor)) {
+    if (!microphoneManager.createMicrophone(audioSource, sampleRate, isStereo, echoCanceler, noiseSuppressor)) {
       return false;
     }
     prepareAudioRtp(isStereo, sampleRate);
     return audioEncoder.prepareAudioEncoder(bitrate, sampleRate, isStereo,
         microphoneManager.getMaxInputSize());
+  }
+
+  public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
+      boolean noiseSuppressor) {
+    return prepareAudio(MediaRecorder.AudioSource.DEFAULT, bitrate, sampleRate, isStereo, echoCanceler,
+        noiseSuppressor);
   }
 
   public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo) {
@@ -223,31 +246,28 @@ public abstract class OnlyAudioBase implements GetAacData, GetMicrophoneData {
     return recordController.getStatus();
   }
 
-  public boolean reTry(long delay, String reason) {
+  /**
+   * Retries to connect with the given delay. You can pass an optional backupUrl
+   * if you'd like to connect to your backup server instead of the original one.
+   * Given backupUrl replaces the original one.
+   */
+  public boolean reTry(long delay, String reason, @Nullable String backupUrl) {
     boolean result = shouldRetry(reason);
     if (result) {
-      reTry(delay);
+      reConnect(delay, backupUrl);
     }
     return result;
   }
 
-  /**
-   * Replace with reTry(long delay, String reason);
-   */
-  @Deprecated
-  public void reTry(long delay) {
-    reConnect(delay);
+  public boolean reTry(long delay, String reason) {
+    return reTry(delay, reason, null);
   }
 
-  /**
-   * Replace with reTry(long delay, String reason);
-   */
-  @Deprecated
-  public abstract boolean shouldRetry(String reason);
+  protected abstract boolean shouldRetry(String reason);
 
   public abstract void setReTries(int reTries);
 
-  protected abstract void reConnect(long delay);
+  protected abstract void reConnect(long delay, @Nullable String backupUrl);
 
   //cache control
   public abstract boolean hasCongestion();
@@ -325,4 +345,6 @@ public abstract class OnlyAudioBase implements GetAacData, GetMicrophoneData {
   }
 
   public abstract void setLogs(boolean enable);
+
+  public abstract void setCheckServerAlive(boolean enable);
 }

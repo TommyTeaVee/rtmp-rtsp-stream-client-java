@@ -1,14 +1,33 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.base;
 
 import android.content.Context;
 import android.hardware.Camera;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
+import android.media.MediaRecorder;
 import android.os.Build;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.TextureView;
+import android.view.View;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -58,18 +77,18 @@ public abstract class Camera1Base
 
   private static final String TAG = "Camera1Base";
 
-  private Context context;
-  private Camera1ApiManager cameraManager;
+  private final Context context;
+  private final Camera1ApiManager cameraManager;
   protected VideoEncoder videoEncoder;
   private MicrophoneManager microphoneManager;
   private AudioEncoder audioEncoder;
   private GlInterface glInterface;
   private boolean streaming = false;
-  private boolean videoEnabled = true;
+  private boolean audioInitialized = false;
   private boolean onPreview = false;
   protected RecordController recordController;
   private int previewWidth, previewHeight;
-  private FpsListener fpsListener = new FpsListener();
+  private final FpsListener fpsListener = new FpsListener();
 
   public Camera1Base(SurfaceView surfaceView) {
     context = surfaceView.getContext();
@@ -156,28 +175,45 @@ public abstract class Camera1Base
   }
 
   /**
-   * Experimental
+   * @return true if success, false if fail (not supported or called before start camera)
    */
-  public void enableFaceDetection(Camera1ApiManager.FaceDetectorCallback faceDetectorCallback) {
-    cameraManager.enableFaceDetection(faceDetectorCallback);
+  public boolean enableFaceDetection(Camera1ApiManager.FaceDetectorCallback faceDetectorCallback) {
+    return cameraManager.enableFaceDetection(faceDetectorCallback);
   }
 
-  /**
-   * Experimental
-   */
   public void disableFaceDetection() {
     cameraManager.disableFaceDetection();
   }
 
-  /**
-   * Experimental
-   */
   public boolean isFaceDetectionEnabled() {
     return cameraManager.isFaceDetectionEnabled();
   }
 
+  /**
+   * @return true if success, false if fail (not supported or called before start camera)
+   */
+  public boolean enableVideoStabilization() {
+    return cameraManager.enableVideoStabilization();
+  }
+
+  public void disableVideoStabilization() {
+    cameraManager.disableVideoStabilization();
+  }
+
+  public boolean isVideoStabilizationEnabled() {
+    return cameraManager.isVideoStabilizationEnabled();
+  }
+
+  /**
+   * Use getCameraFacing instead
+   */
+  @Deprecated
   public boolean isFrontCamera() {
-    return cameraManager.isFrontCamera();
+    return cameraManager.getCameraFacing() == CameraHelper.Facing.FRONT;
+  }
+
+  public CameraHelper.Facing getCameraFacing() {
+    return cameraManager.getCameraFacing();
   }
 
   public void enableLantern() throws Exception {
@@ -269,14 +305,21 @@ public abstract class Camera1Base
    * @return true if success, false if you get a error (Normally because the encoder selected
    * doesn't support any configuration seated or your device hasn't a AAC encoder).
    */
-  public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
+  public boolean prepareAudio(int audioSource, int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
       boolean noiseSuppressor) {
-     if (!microphoneManager.createMicrophone(sampleRate, isStereo, echoCanceler, noiseSuppressor)) {
+     if (!microphoneManager.createMicrophone(audioSource, sampleRate, isStereo, echoCanceler, noiseSuppressor)) {
        return false;
      }
     prepareAudioRtp(isStereo, sampleRate);
-    return audioEncoder.prepareAudioEncoder(bitrate, sampleRate, isStereo,
+    audioInitialized = audioEncoder.prepareAudioEncoder(bitrate, sampleRate, isStereo,
         microphoneManager.getMaxInputSize());
+    return audioInitialized;
+  }
+
+  public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo, boolean echoCanceler,
+      boolean noiseSuppressor) {
+    return prepareAudio(MediaRecorder.AudioSource.DEFAULT, bitrate, sampleRate, isStereo, echoCanceler,
+        noiseSuppressor);
   }
 
   public boolean prepareAudio(int bitrate, int sampleRate, boolean isStereo) {
@@ -327,7 +370,7 @@ public abstract class Camera1Base
     if (!streaming) {
       startEncoders();
     } else if (videoEncoder.isRunning()) {
-      resetVideoEncoder();
+      requestKeyFrame();
     }
   }
 
@@ -349,7 +392,7 @@ public abstract class Camera1Base
     if (!streaming) {
       startEncoders();
     } else if (videoEncoder.isRunning()) {
-      resetVideoEncoder();
+      requestKeyFrame();
     }
   }
 
@@ -413,6 +456,7 @@ public abstract class Camera1Base
             videoEncoder.getFps());
       } else {
         this.glInterface = glInterface;
+        this.glInterface.init();
       }
     }
   }
@@ -445,6 +489,10 @@ public abstract class Camera1Base
       cameraManager.setRotation(rotation);
       cameraManager.start(cameraFacing, width, height, videoEncoder.getFps());
       onPreview = true;
+    } else if (!isStreaming() && !onPreview && glInterface instanceof OffScreenGlThread) {
+      // if you are using background mode startPreview only work to indicate
+      // that you want start with front or back camera
+      cameraManager.setCameraFacing(cameraFacing);
     } else {
       Log.e(TAG, "Streaming or preview started, ignored");
     }
@@ -454,16 +502,20 @@ public abstract class Camera1Base
     startPreview(cameraFacing, width, height, CameraHelper.getCameraOrientation(context));
   }
 
+  public void startPreview(CameraHelper.Facing cameraFacing, int rotation) {
+    startPreview(cameraFacing, videoEncoder.getWidth(), videoEncoder.getHeight(), rotation);
+  }
+
   public void startPreview(CameraHelper.Facing cameraFacing) {
-    startPreview(cameraFacing, 640, 480);
+    startPreview(cameraFacing, videoEncoder.getWidth(), videoEncoder.getHeight());
   }
 
   public void startPreview(int width, int height) {
-    startPreview(CameraHelper.Facing.BACK, width, height);
+    startPreview(getCameraFacing(), width, height);
   }
 
   public void startPreview() {
-    startPreview(CameraHelper.Facing.BACK);
+    startPreview(getCameraFacing());
   }
 
   /**
@@ -506,6 +558,17 @@ public abstract class Camera1Base
     cameraManager.setZoom(event);
   }
 
+  @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
+  public void startStreamAndRecord(String url, String path, RecordController.Listener listener) throws IOException {
+    startStream(url);
+    recordController.startRecord(path, listener);
+  }
+
+  @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
+  public void startStreamAndRecord(String url, String path) throws IOException {
+    startStreamAndRecord(url, path, null);
+  }
+
   protected abstract void startStreamRtp(String url);
 
   /**
@@ -523,7 +586,7 @@ public abstract class Camera1Base
     if (!recordController.isRunning()) {
       startEncoders();
     } else {
-      resetVideoEncoder();
+      requestKeyFrame();
     }
     startStreamRtp(url);
     onPreview = true;
@@ -531,9 +594,9 @@ public abstract class Camera1Base
 
   private void startEncoders() {
     videoEncoder.start();
-    audioEncoder.start();
+    if (audioInitialized) audioEncoder.start();
     prepareGlView();
-    microphoneManager.start();
+    if (audioInitialized) microphoneManager.start();
     cameraManager.setRotation(videoEncoder.getRotation());
     if (!cameraManager.isRunning() && videoEncoder.getWidth() != previewWidth
         || videoEncoder.getHeight() != previewHeight) {
@@ -542,22 +605,22 @@ public abstract class Camera1Base
     onPreview = true;
   }
 
-  private void resetVideoEncoder() {
-    if (glInterface != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-      glInterface.removeMediaCodecSurface();
-    }
-    videoEncoder.reset();
-    if (glInterface != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-      glInterface.addMediaCodecSurface(videoEncoder.getInputSurface());
+  protected void requestKeyFrame() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+      videoEncoder.requestKeyframe();
+    } else {
+      if (glInterface != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+        glInterface.removeMediaCodecSurface();
+      }
+      videoEncoder.reset();
+      if (glInterface != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+        glInterface.addMediaCodecSurface(videoEncoder.getInputSurface());
+      }
     }
   }
 
   private void prepareGlView() {
     if (glInterface != null && Build.VERSION.SDK_INT >= 18) {
-      if (glInterface instanceof OffScreenGlThread) {
-        glInterface = new OffScreenGlThread(context);
-        glInterface.init();
-      }
       glInterface.setFps(videoEncoder.getFps());
       if (videoEncoder.getRotation() == 90 || videoEncoder.getRotation() == 270) {
         glInterface.setEncoderSize(videoEncoder.getHeight(), videoEncoder.getWidth());
@@ -587,46 +650,44 @@ public abstract class Camera1Base
       stopStreamRtp();
     }
     if (!recordController.isRecording()) {
-      microphoneManager.stop();
+      if (audioInitialized) microphoneManager.stop();
       if (glInterface != null && Build.VERSION.SDK_INT >= 18) {
         glInterface.removeMediaCodecSurface();
         if (glInterface instanceof OffScreenGlThread) {
           glInterface.stop();
           cameraManager.stop();
+          onPreview = false;
         }
       }
       videoEncoder.stop();
-      audioEncoder.stop();
+      if (audioInitialized) audioEncoder.stop();
       recordController.resetFormats();
     }
   }
 
-  public boolean reTry(long delay, String reason) {
+  /**
+   * Retries to connect with the given delay. You can pass an optional backupUrl
+   * if you'd like to connect to your backup server instead of the original one.
+   * Given backupUrl replaces the original one.
+   */
+  public boolean reTry(long delay, String reason, @Nullable String backupUrl) {
     boolean result = shouldRetry(reason);
     if (result) {
-      reTry(delay);
+      requestKeyFrame();
+      reConnect(delay, backupUrl);
     }
     return result;
   }
 
-  /**
-   * Replace with reTry(long delay, String reason);
-   */
-  @Deprecated
-  public void reTry(long delay) {
-    resetVideoEncoder();
-    reConnect(delay);
+  public boolean reTry(long delay, String reason) {
+    return reTry(delay, reason, null);
   }
 
-  /**
-   * Replace with reTry(long delay, String reason);
-   */
-  @Deprecated
-  public abstract boolean shouldRetry(String reason);
+  protected abstract boolean shouldRetry(String reason);
 
   public abstract void setReTries(int reTries);
 
-  protected abstract void reConnect(long delay);
+  protected abstract void reConnect(long delay, @Nullable String backupUrl);
 
   //cache control
   public abstract boolean hasCongestion();
@@ -677,14 +738,14 @@ public abstract class Camera1Base
    * Mute microphone, can be called before, while and after stream.
    */
   public void disableAudio() {
-    microphoneManager.mute();
+    if (audioInitialized) microphoneManager.mute();
   }
 
   /**
    * Enable a muted microphone, can be called before, while and after stream.
    */
   public void enableAudio() {
-    microphoneManager.unMute();
+    if (audioInitialized) microphoneManager.unMute();
   }
 
   /**
@@ -694,15 +755,6 @@ public abstract class Camera1Base
    */
   public boolean isAudioMuted() {
     return microphoneManager.isMuted();
-  }
-
-  /**
-   * Get video camera state
-   *
-   * @return true if disabled, false if enabled
-   */
-  public boolean isVideoEnabled() {
-    return videoEnabled;
   }
 
   public int getBitrate() {
@@ -722,14 +774,36 @@ public abstract class Camera1Base
   }
 
   /**
-   * Switch camera used. Can be called on preview or while stream, ignored with preview off.
+   * Switch camera used. Can be called anytime
    *
    * @throws CameraOpenException If the other camera doesn't support same resolution.
    */
   public void switchCamera() throws CameraOpenException {
     if (isStreaming() || onPreview) {
       cameraManager.switchCamera();
+    } else {
+      cameraManager.setCameraFacing(getCameraFacing() ==  CameraHelper.Facing.FRONT ? CameraHelper.Facing.BACK : CameraHelper.Facing.FRONT);
     }
+  }
+
+  public void setExposure(int value) {
+    cameraManager.setExposure(value);
+  }
+
+  public int getExposure() {
+    return cameraManager.getExposure();
+  }
+
+  public int getMaxExposure() {
+    return cameraManager.getMaxExposure();
+  }
+
+  public int getMinExposure() {
+    return cameraManager.getMinExposure();
+  }
+
+  public void tapToFocus(View view, MotionEvent event) {
+    cameraManager.tapToFocus(view, event);
   }
 
   public GlInterface getGlInterface() {
@@ -812,13 +886,8 @@ public abstract class Camera1Base
   protected abstract void onSpsPpsVpsRtp(ByteBuffer sps, ByteBuffer pps, ByteBuffer vps);
 
   @Override
-  public void onSpsPps(ByteBuffer sps, ByteBuffer pps) {
-    if (streaming) onSpsPpsVpsRtp(sps, pps, null);
-  }
-
-  @Override
   public void onSpsPpsVps(ByteBuffer sps, ByteBuffer pps, ByteBuffer vps) {
-    if (streaming) onSpsPpsVpsRtp(sps, pps, vps);
+    onSpsPpsVpsRtp(sps.duplicate(), pps.duplicate(), vps != null ? vps.duplicate() : null);
   }
 
   protected abstract void getH264DataRtp(ByteBuffer h264Buffer, MediaCodec.BufferInfo info);
@@ -844,7 +913,7 @@ public abstract class Camera1Base
 
   @Override
   public void onVideoFormat(MediaFormat mediaFormat) {
-    recordController.setVideoFormat(mediaFormat);
+    recordController.setVideoFormat(mediaFormat, !audioInitialized);
   }
 
   @Override
@@ -853,4 +922,6 @@ public abstract class Camera1Base
   }
 
   public abstract void setLogs(boolean enable);
+
+  public abstract void setCheckServerAlive(boolean enable);
 }

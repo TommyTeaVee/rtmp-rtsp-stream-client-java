@@ -1,8 +1,26 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.rtsp;
 
 import android.content.Context;
 import android.media.MediaCodec;
 import android.os.Build;
+
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import com.pedro.encoder.utils.CodecUtil;
 import com.pedro.rtplibrary.base.DisplayBase;
@@ -21,7 +39,7 @@ import java.nio.ByteBuffer;
 @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
 public class RtspDisplay extends DisplayBase {
 
-  private RtspClient rtspClient;
+  private final RtspClient rtspClient;
 
   public RtspDisplay(Context context, boolean useOpengl, ConnectCheckerRtsp connectCheckerRtsp) {
     super(context, useOpengl);
@@ -100,8 +118,7 @@ public class RtspDisplay extends DisplayBase {
 
   @Override
   protected void prepareAudioRtp(boolean isStereo, int sampleRate) {
-    rtspClient.setIsStereo(isStereo);
-    rtspClient.setSampleRate(sampleRate);
+    rtspClient.setAudioInfo(sampleRate, isStereo);
   }
 
   @Override
@@ -120,13 +137,13 @@ public class RtspDisplay extends DisplayBase {
   }
 
   @Override
-  public boolean shouldRetry(String reason) {
+  protected boolean shouldRetry(String reason) {
     return rtspClient.shouldRetry(reason);
   }
 
   @Override
-  public void reConnect(long delay) {
-    rtspClient.reConnect(delay);
+  public void reConnect(long delay, @Nullable String backupUrl) {
+    rtspClient.reConnect(delay, backupUrl);
   }
 
   @Override
@@ -141,10 +158,7 @@ public class RtspDisplay extends DisplayBase {
 
   @Override
   protected void onSpsPpsVpsRtp(ByteBuffer sps, ByteBuffer pps, ByteBuffer vps) {
-    ByteBuffer newSps = sps.duplicate();
-    ByteBuffer newPps = pps.duplicate();
-    ByteBuffer newVps = vps != null ? vps.duplicate() : null;
-    rtspClient.setSPSandPPS(newSps, newPps, newVps);
+    rtspClient.setVideoInfo(sps, pps, vps);
   }
 
   @Override
@@ -155,5 +169,10 @@ public class RtspDisplay extends DisplayBase {
   @Override
   public void setLogs(boolean enable) {
     rtspClient.setLogs(enable);
+  }
+
+  @Override
+  public void setCheckServerAlive(boolean enable) {
+    rtspClient.setCheckServerAlive(enable);
   }
 }

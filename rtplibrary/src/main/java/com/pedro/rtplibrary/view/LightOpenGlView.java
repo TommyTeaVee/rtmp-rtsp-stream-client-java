@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2021 pedroSG94.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.pedro.rtplibrary.view;
 
 import android.content.Context;
@@ -9,7 +25,6 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import androidx.annotation.RequiresApi;
-import com.pedro.encoder.input.gl.SurfaceManager;
 import com.pedro.encoder.input.gl.render.SimpleCameraRender;
 import com.pedro.encoder.input.gl.render.filters.BaseFilterRender;
 import com.pedro.encoder.utils.gl.GlUtil;
@@ -26,7 +41,7 @@ public class LightOpenGlView extends OpenGlViewBase {
 
   private SimpleCameraRender simpleCameraRender = null;
   private boolean keepAspectRatio = false;
-  private int aspectRatioMode = 0;
+  private AspectRatioMode aspectRatioMode = AspectRatioMode.Adjust;
   private boolean isFlipHorizontal = false, isFlipVertical = false;
 
   public LightOpenGlView(Context context) {
@@ -38,7 +53,7 @@ public class LightOpenGlView extends OpenGlViewBase {
     TypedArray typedArray = context.obtainStyledAttributes(attrs, R.styleable.LightOpenGlView);
     try {
       keepAspectRatio = typedArray.getBoolean(R.styleable.LightOpenGlView_keepAspectRatio, false);
-      aspectRatioMode = typedArray.getInt(R.styleable.OpenGlView_aspectRatioMode, 0);
+      aspectRatioMode = AspectRatioMode.fromId(typedArray.getInt(R.styleable.OpenGlView_aspectRatioMode, 0));
       isFlipHorizontal = typedArray.getBoolean(R.styleable.LightOpenGlView_isFlipHorizontal, false);
       isFlipVertical = typedArray.getBoolean(R.styleable.LightOpenGlView_isFlipVertical, false);
     } finally {
@@ -55,6 +70,10 @@ public class LightOpenGlView extends OpenGlViewBase {
 
   public boolean isKeepAspectRatio() {
     return keepAspectRatio;
+  }
+
+  public void setAspectRatioMode(AspectRatioMode aspectRatioMode) {
+    this.aspectRatioMode = aspectRatioMode;
   }
 
   public void setKeepAspectRatio(boolean keepAspectRatio) {
@@ -74,50 +93,47 @@ public class LightOpenGlView extends OpenGlViewBase {
 
   @Override
   public void run() {
-    releaseSurfaceManager();
-    surfaceManager = new SurfaceManager(getHolder().getSurface());
+    surfaceManager.release();
+    surfaceManager.eglSetup(getHolder().getSurface());
     surfaceManager.makeCurrent();
     simpleCameraRender.initGl(getContext(), encoderWidth, encoderHeight);
     simpleCameraRender.getSurfaceTexture().setOnFrameAvailableListener(this);
-    if (surfaceManagerEncoder == null && surfaceManagerPhoto == null) {
-      surfaceManagerPhoto = new SurfaceManager(encoderWidth, encoderHeight, surfaceManager);
-    }
+    surfaceManagerPhoto.release();
+    surfaceManagerPhoto.eglSetup(encoderWidth, encoderHeight, surfaceManager);
     semaphore.release();
     while (running) {
       if (frameAvailable || forceRender) {
         frameAvailable = false;
         surfaceManager.makeCurrent();
         simpleCameraRender.updateFrame();
-        simpleCameraRender.drawFrame(previewWidth, previewHeight, keepAspectRatio, aspectRatioMode,
-            0, true, isStreamVerticalFlip, isStreamHorizontalFlip);
+        simpleCameraRender.drawFrame(previewWidth, previewHeight, keepAspectRatio, aspectRatioMode.id,
+            0, true, isPreviewVerticalFlip, isPreviewHorizontalFlip);
         surfaceManager.swapBuffer();
 
         synchronized (sync) {
-          if (surfaceManagerEncoder != null && !fpsLimiter.limitFPS()) {
+          if (surfaceManagerEncoder.isReady() && !fpsLimiter.limitFPS()) {
+            int w = muteVideo ? 0 : encoderWidth;
+            int h = muteVideo ? 0 : encoderHeight;
             surfaceManagerEncoder.makeCurrent();
-            if (muteVideo) {
-              simpleCameraRender.drawFrame(0, 0, false, aspectRatioMode, streamRotation, false,
-                  isStreamVerticalFlip, isStreamHorizontalFlip);
-            } else {
-              simpleCameraRender.drawFrame(encoderWidth, encoderHeight, false, aspectRatioMode,
-                  streamRotation, false, isStreamVerticalFlip, isStreamHorizontalFlip);
-            }
-          } else if (takePhotoCallback != null && surfaceManagerPhoto != null) {
-            surfaceManagerPhoto.makeCurrent();
-            simpleCameraRender.drawFrame(encoderWidth, encoderHeight, false, aspectRatioMode,
+            simpleCameraRender.drawFrame(w, h, false, aspectRatioMode.id,
                 streamRotation, false, isStreamVerticalFlip, isStreamHorizontalFlip);
+            surfaceManagerEncoder.swapBuffer();
           }
-          if (takePhotoCallback != null) {
+          if (takePhotoCallback != null && surfaceManagerPhoto.isReady()) {
+            surfaceManagerPhoto.makeCurrent();
+            simpleCameraRender.drawFrame(encoderWidth, encoderHeight, false, aspectRatioMode.id,
+                streamRotation, false, isStreamVerticalFlip, isStreamHorizontalFlip);
             takePhotoCallback.onTakePhoto(GlUtil.getBitmap(encoderWidth, encoderHeight));
             takePhotoCallback = null;
+            surfaceManagerPhoto.swapBuffer();
           }
-          if (surfaceManagerEncoder != null) surfaceManagerEncoder.swapBuffer();
-          else if (surfaceManagerPhoto != null) surfaceManagerPhoto.swapBuffer();
         }
       }
     }
     simpleCameraRender.release();
-    releaseSurfaceManager();
+    surfaceManagerPhoto.release();
+    surfaceManagerEncoder.release();
+    surfaceManager.release();
   }
 
   @Override
@@ -136,8 +152,38 @@ public class LightOpenGlView extends OpenGlViewBase {
   }
 
   @Override
+  public void addFilter(BaseFilterRender baseFilterRender) {
+
+  }
+
+  @Override
+  public void addFilter(int filterPosition, BaseFilterRender baseFilterRender) {
+
+  }
+
+  @Override
+  public void clearFilters() {
+
+  }
+
+  @Override
+  public void removeFilter(int filterPosition) {
+
+  }
+
+  @Override
+  public void removeFilter(BaseFilterRender baseFilterRender) {
+
+  }
+
+  @Override
+  public int filtersCount() {
+    return 0;
+  }
+
+  @Override
   public void setFilter(BaseFilterRender baseFilterRender) {
-    setFilter(0, baseFilterRender);
+    addFilter(baseFilterRender);
   }
 
   @Override
